@@ -4,6 +4,7 @@ import math
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 from comtypes import CLSCTX_ALL
 import numpy as np
+from ctypes import cast, POINTER
 
 # Initialize Mediapipe hands
 mp_hands = mp.solutions.hands
@@ -13,9 +14,9 @@ mp_draw = mp.solutions.drawing_utils
 # PyCaw setup for volume control
 devices = AudioUtilities.GetSpeakers()
 interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-volume = interface.QueryInterface(IAudioEndpointVolume)
+volume = cast(interface, POINTER(IAudioEndpointVolume))
 
-# Get the volume range
+# Get volume range
 vol_range = volume.GetVolumeRange()
 min_vol = vol_range[0]
 max_vol = vol_range[1]
@@ -24,7 +25,6 @@ max_vol = vol_range[1]
 cap = cv2.VideoCapture(0)
 
 def calculate_distance(p1, p2):
-    """Calculate the distance between two points."""
     return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
 while True:
@@ -32,53 +32,44 @@ while True:
     if not ret:
         break
 
-    frame = cv2.flip(frame, 1)  # Flip the frame horizontally
+    frame = cv2.flip(frame, 1)
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    # Process the frame to detect hands
     results = hands.process(rgb_frame)
 
     if results.multi_hand_landmarks:
         for hand_landmarks in results.multi_hand_landmarks:
-            # Draw hand landmarks
             mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
-            # Get the thumb tip and index finger tip landmarks
+            # Get fingertips
             thumb_tip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]
             index_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
 
-            # Convert normalized landmarks to pixel values
             thumb_tip_coords = (int(thumb_tip.x * frame.shape[1]), int(thumb_tip.y * frame.shape[0]))
             index_tip_coords = (int(index_tip.x * frame.shape[1]), int(index_tip.y * frame.shape[0]))
 
-            # Draw circles at the thumb and index finger tips
             cv2.circle(frame, thumb_tip_coords, 10, (255, 0, 0), -1)
             cv2.circle(frame, index_tip_coords, 10, (0, 255, 0), -1)
 
-            # Calculate the distance between thumb and index finger tips
             distance = calculate_distance(thumb_tip_coords, index_tip_coords)
 
-            # Map the distance to the volume range
+            # Map distance to volume
             vol = np.interp(distance, [30, 150], [min_vol, max_vol])
             volume.SetMasterVolumeLevel(vol, None)
 
-            # Display volume level on the frame
+            # Volume bar UI
             vol_bar = np.interp(distance, [30, 150], [400, 150])
             cv2.rectangle(frame, (50, 150), (85, 400), (0, 255, 0), 1)
             cv2.rectangle(frame, (50, int(vol_bar)), (85, 400), (0, 255, 0), -1)
 
-            # Show the current volume percentage
             vol_percentage = np.interp(distance, [30, 150], [0, 100])
             cv2.putText(frame, f"{int(vol_percentage)}%", (40, 450), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 1)
 
-    # Display the frame
     cv2.imshow("Gesture Volume Control", frame)
 
-    # Exit on pressing 'q'
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Release resources
 cap.release()
 cv2.destroyAllWindows()
 hands.close()
